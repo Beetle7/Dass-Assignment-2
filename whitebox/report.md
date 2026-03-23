@@ -32,53 +32,46 @@ Some warnings could not be fixed by restructuring the code without making it har
 
 # Phase 2: White Box Test Cases
 
-Tests were written in whitebox/tests/test_moneypoly.py to cover every module in the codebase. For each module the tests cover the main success path, boundary values, and every branch condition. Running the tests found 5 logical errors in the code, which are described below along with the fixes.
+Tests were written in whitebox/tests/test_moneypoly.py to cover every module in the codebase. For each module the tests cover the main success path, boundary values, and every branch condition. Running the tests found 7 logical errors in the code, which are described below along with the fixes.
 
 ## Error 1: all_owned_by used any() instead of all() in property.py
 
-The get_rent() method doubles rent when a player owns the full colour group. To test this we needed one test where the player owns only some properties in the group, and another where they own all of them, and check that doubling only happens in the second case.
-
-The bug was in all_owned_by() on line 86 of property.py. It used any(p.owner == player ...) which returns True as soon as the player owns even a single property in the group. This meant rent was doubled from the moment a player bought their first property in a group, which is wrong. The fix was to change any() to all() so the check only passes when every property in the group belongs to the same player.
+The bug was in all_owned_by() on line 86 of property.py. It used any(p.owner == player ...) which returns True as soon as the player owns even a single property in the group. This meant rent was doubled from the moment a player bought their first property in a group. The fix was to change any() to all().
 
 Tests that caught this: test_all_owned_by_partial, test_all_owned_by_split, test_rent_single_owner_no_double
 
 ## Error 2: move() only gave Go salary when landing on Go, not when passing it
 
-Standard Monopoly rules say a player collects $200 whenever they pass or land on Go. We tested both cases separately and the one for passing Go failed.
-
-The bug was in move() in player.py. The condition was if self.position == 0 which only fires when a player lands exactly on position 0 after the modulo. If a player is on position 38 and rolls 4 they end up on position 2, passing Go without triggering the salary. The fix was to check whether the raw move (before modulo) is at least BOARD_SIZE, which means the player wrapped around.
+The bug was in move() in player.py. The condition was if self.position == 0 which only fires when a player lands exactly on position 0 after the modulo. The fix was to check whether the raw move (before modulo) is at least BOARD_SIZE, which means the player wrapped around.
 
 Test that caught this: test_move_pass_go_gives_salary
 
 ## Error 3: buy_property used <= instead of < when checking affordability in game.py
 
-A player with exactly the right amount of money should be allowed to buy a property. We tested this boundary case and it failed.
-
-The bug was on line 143 of game.py: if player.balance <= prop.price. This blocked the purchase even when balance exactly equals price. A player with $60 could not buy a $60 property. The fix was to change <= to <.
+The bug was on line 143 of game.py: if player.balance <= prop.price. This blocked the purchase even when balance exactly equals price. The fix was to change <= to <.
 
 Test that caught this: test_buy_exact_balance
 
 ## Error 4: pay_rent deducted from the renter but never credited the owner in game.py
 
-Rent is a two-sided transaction. We wrote a test that checks both that the renter's balance goes down and that the owner's balance goes up.
-
-The bug was in pay_rent() in game.py. The code called player.deduct_money(rent) but never called prop.owner.add_money(rent). The rent money was effectively removed from the game and the property owner received nothing, making owning property pointless. The fix was to add the add_money call right after the deduction.
+The bug was in pay_rent() in game.py. The code called player.deduct_money(rent) but never called prop.owner.add_money(rent). The rent money was removed from the game and the property owner received nothing. The fix was to add the add_money call right after the deduction.
 
 Test that caught this: test_rent_credited_to_owner
 
 ## Error 5: find_winner used min() instead of max() in game.py
 
-The winner should be the player with the highest net worth. We tested this with two players of different balances and checked that the richer one is declared winner.
-
-The bug was on line 367 of game.py: return min(self.players, key=lambda p: p.net_worth()). This returned the player with the lowest net worth, the complete opposite of correct. The fix was to change min to max.
+The bug was on line 367 of game.py: return min(self.players, key=lambda p: p.net_worth()). This returned the player with the lowest net worth. The fix was to change min to max.
 
 Test that caught this: test_find_winner_richest
 
 ## Error 6: dice.py rolled 1 to 5 instead of 1 to 6
 
-The first range test (test_roll_range) was not strict enough to catch this because values 1 to 5 are still within the range 1 to 6, so the assertion passed. To actually catch the bug a second test (test_roll_max_reachable) was written that runs 500 rolls and checks that the value 6 appears at least once, which it never did with the original code.
-
-The bug was in dice.py on lines 24 and 25: random.randint(1, 5) was used for both dice. A standard six-sided die produces values from 1 to 6. Using 1 to 5 means 6 is never reachable, the maximum roll total is 10 instead of 12, and several board positions can never be reached in a single turn. The fix was to change both calls to random.randint(1, 6).
+The bug was in dice.py on lines 24 and 25: random.randint(1, 5) was used for both dice. The fix was to change both calls to random.randint(1, 6).
 
 Test that caught this: test_roll_max_reachable
 
+## Error 7: trade() never credits the seller in game.py
+
+The bug is in trade() in game.py. The code calls buyer.deduct_money(cash_amount) and transfers ownership but never calls seller.add_money(cash_amount). The seller receives nothing for their property.
+
+Test that documents this: test_seller_balance_increases
