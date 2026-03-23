@@ -1,79 +1,90 @@
 #!/bin/bash
 
-# Cart Tests
-# Prerequisites: Server running on localhost:8080
-# Using X-Roll-Number: 2024101139 and X-User-ID: 1
+# Cart API Tests
+BASE_URL="http://localhost:8080/api/v1/cart"
+ROLL="2024101139"
+USER_ID="1"
 
-echo "---- Cart Tests ----"
+echo "---- Cart API Tests ----"
 
-# Clear Existing Cart
-echo "0. Clearing Cart (Setup)"
-curl -s -X DELETE -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" http://localhost:8080/api/v1/cart/clear
+req() {
+    curl -s -H "X-Roll-Number: $ROLL" -H "X-User-ID: $USER_ID" -H "Content-Type: application/json" "$@"
+}
+
+# 0. Clear cart first
+echo "0. DELETE /cart/clear - setup"
+req -X DELETE "$BASE_URL/clear"
 echo -e "\n"
 
-# 1. View Empty Cart
-echo "1. View Cart (Expect Empty)"
-curl -s -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" http://localhost:8080/api/v1/cart
+# 1. Get empty cart
+echo "1. GET /cart - empty"
+req "$BASE_URL"
 echo -e "\n"
 
-# 2. Add New Item (Success)
-# Modify PRODUCT_ID (101) if necessary
-echo "2. Add Item (Product 101, Qty 2)"
-curl -s -X POST -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"product_id": 101, "quantity": 2}' http://localhost:8080/api/v1/cart/add
+# 2. Add item (valid, qty 1)
+echo "2. POST /cart/add - Product 101, qty 1"
+req -X POST -d '{"product_id": 101, "quantity": 1}' "$BASE_URL/add"
 echo -e "\n"
 
-# 3. Add Same Item Again (Merge Quantity)
-echo "3. Add Same Item (Product 101, Qty 1) - Expect Qty 3"
-curl -s -X POST -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"product_id": 101, "quantity": 1}' http://localhost:8080/api/v1/cart/add
+# 3. Add same product again -> quantities must accumulate (not replace)
+echo "3. POST /cart/add - Product 101, qty 2 again (total should be 3)"
+req -X POST -d '{"product_id": 101, "quantity": 2}' "$BASE_URL/add"
+req "$BASE_URL"
 echo -e "\n"
 
-# 4. Add Another Item (Success)
-# Modify PRODUCT_ID (102) if necessary
-echo "4. Add Another Item (Product 102, Qty 1)"
-curl -s -X POST -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"product_id": 102, "quantity": 1}' http://localhost:8080/api/v1/cart/add
+# 4. Zero quantity -> 400
+# FAILED: server accepts quantity 0
+echo "4. POST /cart/add - qty 0 (expect 400) [Bug Test]"
+req -X POST -d '{"product_id": 102, "quantity": 0}' "$BASE_URL/add" -w " Status: %{http_code}"
 echo -e "\n"
 
-# 5. Invalid Quantity (0) (Fail - Expect 400)
-echo "5. Add Invalid Quantity (0)"
-curl -s -X POST -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"product_id": 101, "quantity": 0}' http://localhost:8080/api/v1/cart/add
+# 5. Negative quantity -> 400
+# FAILED: server accepts negative quantity and reduces cart total
+echo "5. POST /cart/add - qty -1 (expect 400) [Bug Test]"
+req -X POST -d '{"product_id": 102, "quantity": -1}' "$BASE_URL/add" -w " Status: %{http_code}"
 echo -e "\n"
 
-# 6. Invalid Quantity (Negative) (Fail - Expect 400)
-echo "6. Add Invalid Quantity (-5)"
-curl -s -X POST -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"product_id": 101, "quantity": -5}' http://localhost:8080/api/v1/cart/add
+# 6. Non-existent product -> 404
+echo "6. POST /cart/add - product 999999 (expect 404)"
+req -X POST -d '{"product_id": 999999, "quantity": 1}' "$BASE_URL/add" -w " Status: %{http_code}"
 echo -e "\n"
 
-# 7. Add Non-Existent Product (Fail - Expect 404)
-echo "7. Add Non-Existent Product (99999)"
-curl -s -X POST -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"product_id": 99999, "quantity": 1}' http://localhost:8080/api/v1/cart/add
+# 7. Subtotal overflow check: price 120 * qty 2 = 240, not -16
+# FAILED: server returns subtotal -16 (signed 8-bit integer overflow)
+echo "7. POST /cart/add - Product 13, qty 2 (subtotal must be 240, not -16) [Bug Test]"
+req -X POST -d '{"product_id": 13, "quantity": 2}' "$BASE_URL/add"
+echo "GET /cart - verify subtotals and total:"
+req "$BASE_URL"
 echo -e "\n"
 
-# 8. Update Quantity (Success)
-echo "8. Update Item Quantity (Product 101 to 5)"
-curl -s -X POST -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"product_id": 101, "quantity": 5}' http://localhost:8080/api/v1/cart/update
+# 8. Update item quantity
+echo "8. POST /cart/update - Product 101 to qty 5"
+req -X POST -d '{"product_id": 101, "quantity": 5}' "$BASE_URL/update"
 echo -e "\n"
 
-# 9. Remove Item (Success)
-echo "9. Remove Item (Product 102)"
-curl -s -X POST -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"product_id": 102}' http://localhost:8080/api/v1/cart/remove
+# 9. Update item to qty 0 -> 400
+echo "9. POST /cart/update - Product 101 to qty 0 (expect 400)"
+req -X POST -d '{"product_id": 101, "quantity": 0}' "$BASE_URL/update" -w " Status: %{http_code}"
 echo -e "\n"
 
-# 10. Remove Non-Existent Item (Fail - Expect 404)
-echo "10. Remove Non-Existent Item (Product 102 - already removed)"
-curl -s -X POST -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"product_id": 102}' http://localhost:8080/api/v1/cart/remove
+# 10. Remove item
+echo "10. POST /cart/remove - Product 101"
+req -X POST -d '{"product_id": 101}' "$BASE_URL/remove"
 echo -e "\n"
 
-# 11. View Final Cart (Verify Totals)
-echo "11. View Final Cart (Expect Product 101 with Qty 5)"
-curl -s -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" http://localhost:8080/api/v1/cart
+# 11. Remove item not in cart -> 404
+echo "11. POST /cart/remove - Product 999999 not in cart (expect 404)"
+req -X POST -d '{"product_id": 999999}' "$BASE_URL/remove" -w " Status: %{http_code}"
 echo -e "\n"
 
-# 12. Clear Cart (Success)
-echo "12. Clear Cart"
-curl -s -X DELETE -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" http://localhost:8080/api/v1/cart/clear
+# 12. Verify cart total = sum of all item subtotals
+echo "12. GET /cart - verify total matches sum of subtotals"
+req "$BASE_URL"
 echo -e "\n"
 
-# 13. Verify Empty Cart
-echo "13. Verify Cart is Empty"
-curl -s -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" http://localhost:8080/api/v1/cart
+# 13. Clear cart
+echo "13. DELETE /cart/clear"
+req -X DELETE "$BASE_URL/clear"
 echo -e "\n"
+
+echo "---- End Cart API Tests ----"

@@ -1,32 +1,44 @@
 #!/bin/bash
 
-# Profile Tests
-# Prerequisites: Server running on localhost:8080
-# Using X-Roll-Number: 2024101139 and X-User-ID: 1
+# Profile API Tests
+BASE_URL="http://localhost:8080/api/v1/profile"
+ROLL="2024101139"
+USER_ID="1"
 
-echo "---- Profile Tests ----"
+echo "---- Profile API Tests ----"
 
-# 1. Get Profile (Success)
-echo "1. Get Profile"
-curl -s -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" http://localhost:8080/api/v1/profile
+req() {
+    curl -s -H "X-Roll-Number: $ROLL" -H "X-User-ID: $USER_ID" -H "Content-Type: application/json" "$@"
+}
+
+# 1. Get profile
+echo "1. GET /profile"
+req "$BASE_URL"
 echo -e "\n"
 
-# 2. Update Profile (Success)
-echo "2. Update Profile (Success)"
-curl -s -X PUT -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"name": "Kavi Updated", "phone": "9876543210"}' http://localhost:8080/api/v1/profile
+# 2. Update profile (valid)
+echo "2. PUT /profile (valid name + phone)"
+req -X PUT -d '{"name": "Kavi Updated", "phone": "9876543210"}' "$BASE_URL"
 echo -e "\n"
 
-# 3. Name Too Short (Fail - Expect 400)
-echo "3. Update Profile - Name Too Short"
-curl -s -X PUT -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"name": "A", "phone": "9876543210"}' http://localhost:8080/api/v1/profile
+# 3. Name too short (< 2 chars) -> 400
+echo "3. PUT /profile - name too short (expect 400)"
+req -X PUT -d '{"name": "A", "phone": "9876543210"}' "$BASE_URL" -w " Status: %{http_code}"
 echo -e "\n"
 
-# 4. Name Too Long (Fail - Expect 400)
-echo "4. Update Profile - Name Too Long"
-curl -s -X PUT -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"name": "ThisNameIsWayTooLongAndHasMoreThanFiftyCharactersWhichIsForbidden", "phone": "9876543210"}' http://localhost:8080/api/v1/profile
+# 4. Name too long (> 50 chars) -> 400
+echo "4. PUT /profile - name too long (expect 400)"
+req -X PUT -d '{"name": "ThisNameIsWayTooLongAndHasMoreThanFiftyCharactersWhichIsForbidden", "phone": "9876543210"}' "$BASE_URL" -w " Status: %{http_code}"
 echo -e "\n"
 
-# 5. Phone Invalid (Fail - Expect 400)
-echo "5. Update Profile - Phone Invalid"
-curl -s -X PUT -H "X-Roll-Number: 2024101139" -H "X-User-ID: 1" -H "Content-Type: application/json" -d '{"name": "Valid Name", "phone": "123"}' http://localhost:8080/api/v1/profile
+# 5. Phone not 10 digits -> 400
+echo "5. PUT /profile - phone too short (expect 400)"
+req -X PUT -d '{"name": "Valid Name", "phone": "123"}' "$BASE_URL" -w " Status: %{http_code}"
 echo -e "\n"
+
+# 6. Phone with letters -> 400
+echo "6. PUT /profile - phone with letters (expect 400)"
+req -X PUT -d '{"name": "Valid Name", "phone": "98765abcde"}' "$BASE_URL" -w " Status: %{http_code}"
+echo -e "\n"
+
+echo "---- End Profile API Tests ----"

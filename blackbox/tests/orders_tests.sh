@@ -1,92 +1,70 @@
 #!/bin/bash
 
-# Orders Tests
-# Prerequisites: Server running on localhost:8080
-# Using X-Roll-Number: 2024101139 and X-User-ID: 1
-
+# Orders API Tests
 BASE_URL="http://localhost:8080/api/v1"
-HEADERS="-H 'X-Roll-Number: 2024101139' -H 'X-User-ID: 1' -H 'Content-Type: application/json'"
 ROLL="2024101139"
 USER_ID="1"
 
-echo "---- Orders Tests ----"
+echo "---- Orders API Tests ----"
 
-# Helper
 req() {
     curl -s -H "X-Roll-Number: $ROLL" -H "X-User-ID: $USER_ID" -H "Content-Type: application/json" "$@"
 }
 
-# 1. Get All Orders
-echo "1. Get All Orders"
+# Setup: create an order to work with
+echo "0. Setup: clear cart, add product, checkout (COD)"
+req -X DELETE "$BASE_URL/cart/clear"
+req -X POST -d '{"product_id": 103, "quantity": 1}' "$BASE_URL/cart/add"
+CHECKOUT=$(req -X POST -d '{"payment_method": "COD"}' "$BASE_URL/checkout")
+echo "$CHECKOUT"
+ORDER_ID=$(echo "$CHECKOUT" | grep -oP '"order_id":\s*\K\d+')
+echo "Order ID: $ORDER_ID"
+echo -e "\n"
+
+# 1. Get all orders
+echo "1. GET /orders"
 req "$BASE_URL/orders"
 echo -e "\n"
 
-# Verify functionality: List orders. (Should show 3001, 3002, 3003 from checkout tests).
-
-# 2. Get Specific Order (Using 3003 as our latest)
-echo "2. Get Order 3003 - Should Succeed 200"
-req "$BASE_URL/orders/3003" -w " Status: %{http_code}"
+# 2. Get one order by ID
+echo "2. GET /orders/$ORDER_ID"
+req "$BASE_URL/orders/$ORDER_ID"
 echo -e "\n"
 
-# 3. Get Non-Existent Order
-echo "3. Get Order 9999 - Should Fail 404"
-req "$BASE_URL/orders/9999" -w " Status: %{http_code}"
+# 3. Get invoice - check subtotal, GST, and total math
+# FAILED: invoice total does not equal subtotal + GST
+echo "3. GET /orders/$ORDER_ID/invoice [Bug Test - total may not match subtotal+GST]"
+req "$BASE_URL/orders/$ORDER_ID/invoice"
 echo -e "\n"
 
-# 4. Get Invoice for Order
-echo "4. Get Invoice for Order 3003 - Should Succeed 200"
-req "$BASE_URL/orders/3003/invoice" -w " Status: %{http_code}"
+# 4. Note stock of product 103 before cancel
+echo "4. GET /admin/products - note stock of product 103 before cancel"
+curl -s -H "X-Roll-Number: $ROLL" "$BASE_URL/admin/products"
 echo -e "\n"
 
-# 5. Cancel Order (Valid)
-# Order 3002 was COD and PLACED. (However, checkout showed PAID, which might imply 'Delivered' later or just paid).
-# Docs: "A delivered order cannot be cancelled."
-# If PLACED/PAID != DELIVERED, cancel should work.
-echo "5. Cancel Order 3002 (PLACED/PAID) - Should Succeed 200"
-req -X POST "$BASE_URL/orders/3002/cancel" -w " Status: %{http_code}"
+# 5. Cancel order - stock should restore
+# FAILED: stock does not increase after cancellation
+echo "5. POST /orders/$ORDER_ID/cancel [Bug Test - stock should restore by +1]"
+req -X POST "$BASE_URL/orders/$ORDER_ID/cancel"
+echo "Stock after cancel:"
+curl -s -H "X-Roll-Number: $ROLL" "$BASE_URL/admin/products"
 echo -e "\n"
 
-# 6. Verify Cancelled Status
-echo "Verifying Order 3002 Status after Cancel:"
-req "$BASE_URL/orders/3002"
+# 6. Cancel already-cancelled order -> should not return 200
+# FAILED: server returns 200 "Order cancelled successfully" on repeat cancel
+echo "6. POST /orders/$ORDER_ID/cancel again (expect 400/409) [Bug Test]"
+req -X POST "$BASE_URL/orders/$ORDER_ID/cancel" -w " Status: %{http_code}"
 echo -e "\n"
 
-# 7. Cancel Already Cancelled Order (3002) - Should Fail 400
-echo "7. Cancel Order 3002 (Already Cancelled) - Should Fail 400"
-req -X POST "$BASE_URL/orders/3002/cancel" -w " Status: %{http_code}"
+# 7. Cancel non-existent order -> 404
+echo "7. POST /orders/999999/cancel (expect 404)"
+req -X POST "$BASE_URL/orders/999999/cancel" -w " Status: %{http_code}"
 echo -e "\n"
 
-# 8. Cancel Non-Existent Order
-echo "8. Cancel Order 9999 - Should Fail 404"
-req -X POST  "$BASE_URL/orders/9999/cancel" -w " Status: %{http_code}"
+# 8. Try to cancel a DELIVERED order -> 400
+echo "8. GET /admin/orders - find a DELIVERED order then attempt cancel (expect 400)"
+curl -s -H "X-Roll-Number: $ROLL" "$BASE_URL/admin/orders"
+echo "(Manually pick a delivered order_id from above and cancel it to verify 400)"
 echo -e "\n"
 
-# 9. Cancel Delivered Order
-# From test 1, we saw Order 2038 is DELIVERED.
-echo "9. Cancel Delivered Order 2038 - Should Fail 400"
-req -X POST "$BASE_URL/orders/2038/cancel" -w " Status: %{http_code}"
-echo -e "\n"
-
-# 10. Verify Stock Update after Cancellation & Invoice Calculation Bug
-# Verify stock for Product 103 (in Order 3003)
-echo "10. Stock Update Verification (Order 3003, Product 103)"
-echo "Current Product 103 Info (Before Cancel):"
-req "$BASE_URL/products/103"
-echo -e "\n"
-
-echo "Cancelling Order 3003..."
-req -X POST "$BASE_URL/orders/3003/cancel"
-echo -e "\n"
-
-echo "Product 103 Info After Cancellation (Stock should inc):"
-req "$BASE_URL/products/103"
-echo -e "\n"
-
-# 11. Invoice Calculation Check
-# Order 3003 Invoice: Subtotal 80, GST 4. Expected Total 84.
-# Previous test output showed 94.
-echo "11. Invoice Calculation Verification (Order 3003)"
-req "$BASE_URL/orders/3003/invoice"
-echo -e "\n"
-
-echo "---- End Orders Tests ----"
+echo "---- End Orders API Tests ----"
